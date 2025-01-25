@@ -22,7 +22,7 @@ There are many conventions, pitfalls, unwritten rules and undocumented practices
 This document tries to help you navigate these treacherous waters.
 
 This guide is written by an engineer that deals with LDAP since late 1990s.
-If you are an old LDAP engineer, you will quite certainly do not like my point of view.
+If you are an old LDAP engineer, you will quite certainly not like my point of view.
 I'm not trying to change your opinion.
 That is not the purpose of this guide.
 What I'm trying to do is to give tips on how to survive in the LDAP labyrinth.
@@ -35,7 +35,9 @@ The most common use of LDAP is to enable password-based authentication for appli
 The applications use `bind` LDAP operation to authenticate to the directory server.
 If that operation is successful, the application assumes that the password was correct.
 There is a wrong way how to implement this authentication (using `dn` pattern) and a less wrong way how to do it (`search` then `bind`).
-However, there is no correct way, as LDAP was never designed to be an authentication server.
+However, there is no correct way, as LDAP was never designed to be an authentication server. 
+Really? Why do you say this?
+
 Yet, this remains the most widespread use of LDAP protocol by far.
 
 Of course, this is causing a lot of problems.
@@ -49,6 +51,10 @@ While this is not a problem of LDAP protocol per se, it tells a lot about the LD
 LDAP is used in a way that was not intended and that the original designers never anticipated.
 A protocol created in 1990s, with roots in telecommunication world of 1980s, is used to handle 21st century use cases.
 It is no wonder it is not very well-equipped for that.
+
+smckinn: It is technically correct to say there is no session from the client perspective. Although, it has connections, which function as a sessions WRT auditing requirements.
+Was LDAPv3 designed with "Identity" in mind? No, of course not. As you point out it predates those concerns. 
+Can it be used as the backbone for a "modern" Identity server/network? No answer needed. Just have a look around.
 
 === What To Do About It?
 
@@ -90,19 +96,29 @@ Strictly speaking, standard-compliant LDAP clients MUST be able to handle multi-
 But is the client supposed to handle it?
 LDAP does not guarantee ordering, therefore taking the first value makes no sense.
 
+smckinn: LDAP is a victim of its own success. During its rapid adoption many mistakes were made in terms of the adopters. What we're talking about here is schema.
+Specifically, inetorgperson and eduperson. Which was adopted by the enterprise and universities. These schemas contain multivalue attributes that should not have been.
+It would be a simple matter to devise a new schema for modern applications. Perhaps that is somethign we should do.
+
 ==== What To Do About It?
 
 This one is simple.
 Never ever use `cn`, `sn`, `givenName` and similar attributes as multi-valued attributes.
 Always use them as single-valued attributes.
 
+smckinn: Agreed
+
 There are some cases when multi-valued nature of `uid` makes sense.
 However, it is better to avoid that as well, unless you really know what you are doing, and you are fully aware of all the consequences.
+
+smckinn: I've never seen a valid use case for a multivalued uid. Still waiting.
 
 This is exactly what almost all the LDAP clients do.
 Therefore, vast majority of LDAP clients are not perfectly LDAP-compliant.
 Yet, this non-compliance does not make any significant problems in the real world.
 This is LDAP world, you just have to follow unwritten LDAP conventions in addition to LDAP standards and you are fine.
+
+smckinn: Are we still conflating convention with technology? Why must we follow these unwritten conventions? Are we not in control of our own envs? Show me a use case where LDAP "can't" follow standard that doesn't involve a client not willing to change how they handle the data model.
 
 .Blast from the past
 TIP: There are other places of the schema where you can feel the 1980s.
@@ -113,6 +129,8 @@ There is no concept of contact channels.
 There is even no concept of "work phone number".
 Not to mention chat applications and social networks.
 The schema is frozen in the 1990s.
+
+smckinn: Here we agree again. But this is not necessarily so. Are we blaming the technology for mistakes made by its adopters?
 
 === Account Activation
 
@@ -157,6 +175,8 @@ There are tricks how to disable `bind` and hide disabled accounts using ACLs.
 But that is also problematic.
 In fact, there is no good way how to do account disable in OpenLDAP.
 
+smckinn: How about using delete? Why must the account remain if it has been (permanently) disabled? If it must be restored or interrogated move it to another ou. As you pointed out, LDAP is not an Identity system. It's a system of record and AuthN provider.
+
 | Active Directory
 | Use `userAccountControl` attribute.
 This is a very ugly attribute, it is difficult to work with.
@@ -190,6 +210,7 @@ But does it matter that you can create an account under 1 millisecond, when full
 
 There is not much you can do about this.
 Older LDAP servers (notably the iPlanet family) are very problematic with big groups.
+
 Some LDAP servers (notably OpenLDAP) can make fast updates even for big groups.
 You can replace your LDAP server with a faster one.
 However, due to subtle incompatibilities between servers, replacement of a LDAP server is a slow and risky process.
@@ -229,6 +250,7 @@ It is basic survival tool when working with groups.
 Almost all server have such mechanism, many servers have it enabled by default.
 OpenLDAP is one popular server that does *not* have it enabled by default, however there is a special `memberOf` overlay that provides this functionality.
 
+smckinn: Agreed, use memberOf for reverse group lookup.
 
 === No Empty Groups
 
@@ -238,7 +260,24 @@ The official reason for this decision is to avoid empty groups.
 This is a noble goal.
 The trouble is that it makes no sense whatsoever.
 
+smckinn: What we're talking about is schema. For example:
+
+```
+objectclass ( 2.5.6.9 NAME 'groupOfNames'
+    DESC 'RFC2256: a group of names (DNs)'
+    SUP top STRUCTURAL
+    MUST ( member $ cn )
+    MAY ( businessCategory $ seeAlso $ owner $ ou $ o $ description ) )
+```
+
+Why was it designed this way? Who knows? It's from the distant past. Yet, we continue to follow it today. How about design a new schema for groups? What's stopping you? (Bracing for "users")
+
+***
+
 This means that groups cannot be pre-provisioned.
+
+Sure it can. Design a group schema that allows it.
+
 This means that if the last member of the group is removed, the group has to be removed as well.
 This means that if a group is temporarily empty, it has to be deleted and re-created.
 Re-created group will have a new `entryUUID`, therefore it will be considered to be a new object by smart LDAP clients.
@@ -259,6 +298,8 @@ However, that check is not reliable, as standard LDAP does not have consistency 
 The fake member might have been removed in the time before the check and the modify, therefore the modify operation can still fail.
 It is even worse if we try to add fake member to an empty group, however I would like to leave that particular algorithm to the reader to figure out.
 All in all, this is how LDAP standard makes a simple thing unbelievably complex.
+
+smckinn: Hyperboloic statements aside lets look at the facts. The problems your describing have to do with the schema and not the technology. How it has been practiced. We can do better. Lets design and implement new schemas. Ones that support new use cases in Identity. Because as you've said, these data designs were built before even mobile computing. In short the data structures are outdated and in need of repair. The scaffolding, the LDAPv3 standard itself remains intact and capable of carrying the load.
 
 ==== What To Do About It?
 
